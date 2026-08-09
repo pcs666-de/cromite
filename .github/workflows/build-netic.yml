@@ -16,7 +16,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: apktool & aapt/zipalign installieren
+      - name: apktool & aapt/zipalign/apksigner installieren
         run: |
           sudo curl -L -o /usr/local/bin/apktool.jar \
             https://github.com/iBotPeaches/Apktool/releases/download/v3.0.2/apktool_3.0.2.jar
@@ -38,36 +38,62 @@ jobs:
 
           echo "PATH=$PATH:$HOME/android-sdk/build-tools/34.0.0" >> "$GITHUB_ENV"
 
-      - name: Neuestes Cromite-APK herunterladen
+      - name: Neuestes Cromite-APK herunterladen (arm64 + arm)
         run: |
           curl -L -o cromite.apk https://github.com/uazo/cromite/releases/latest/download/arm64_ChromePublic.apk
+          curl -L -o cromite-arm.apk https://github.com/uazo/cromite/releases/latest/download/arm_ChromePublic.apk
 
       - name: APK entpacken
         run: |
           apktool d cromite.apk -o netic-src -f
+          apktool d cromite-arm.apk -o netic-src-arm -f
 
-      - name: AndroidManifest.xml bereinigen
+      - name: 32-Bit-ARM-Libs mergen (Fat APK für mehr Geräte)
+        run: |
+          # x86/x86_64 bietet Cromite im aktuellen Release nicht an - kann daher
+          # nicht mit eingebaut werden. arm + arm64 deckt praktisch alle echten
+          # Android-Telefone ab.
+          mkdir -p netic-src/lib
+          if [ -d netic-src-arm/lib ]; then
+            cp -r netic-src-arm/lib/. netic-src/lib/
+          fi
+          echo "Enthaltene ABIs:"; ls netic-src/lib
+
+      - name: AndroidManifest.xml bereinigen & Paket/Name umbenennen
         run: |
           # apktool 3.0.2 schreibt den Android-Namespace nicht als "android:",
           # sondern als generischen Alias (hier "n0:"). Deshalb generisch auf
-          # ein beliebiges Namespace-Präfix (\w+:) vor dem Attributnamen matchen,
-          # statt fest "android:" anzunehmen.
+          # ein beliebiges Namespace-Präfix (\w+:) matchen.
           #
-          # WICHTIG: Nur das Attribut selbst entfernen (s///), NICHT die ganze
-          # Zeile löschen (/d). apktool schreibt das schließende ">" bzw. "/>"
-          # eines Tags oft in derselben Zeile wie das letzte Attribut. Eine
-          # Zeilenlöschung würde dieses ">" mitreißen und das Tag unclosed
-          # zurücklassen -> XML-Parse-Fehler "manifest must be terminated".
+          # 1) Nur Attribute entfernen (s///), NICHT ganze Zeilen löschen (/d) -
+          #    sonst reißt man das schließende ">"/"/>" mit raus und die XML
+          #    bricht (führt zu "manifest must be terminated").
           sed -i -E 's/[[:space:]]*[A-Za-z0-9]+:zygotePreloadNativeLib="[^"]*"//g' netic-src/AndroidManifest.xml
           sed -i -E 's/[[:space:]]*[A-Za-z0-9]+:nativeService="[^"]*"//g' netic-src/AndroidManifest.xml
 
+          # 2) Paketname umbenennen. Bestätigt per Binäranalyse: package blieb
+          #    bislang "org.cromite.cromite" - Kollisionsgefahr mit echtem
+          #    Cromite und Teil des Rebranding-Bugs.
+          sed -i -E 's/package="org\.cromite\.cromite"/package="ws.ct.pcs-production.netic"/' netic-src/AndroidManifest.xml
+
+          # 3) App-Label umbenennen. Bestätigt per Binäranalyse: android:label
+          #    steht als Literal "Cromite" direkt im Manifest (keine
+          #    @string/app_name-Referenz) - deshalb griff das reine
+          #    strings.xml-Ersetzen bisher nicht für den Anzeigenamen.
+          sed -i -E 's/([A-Za-z0-9]+:label)="Cromite"/\1=".Netic"/g' netic-src/AndroidManifest.xml
+
           remaining=$(grep -c -E '[A-Za-z0-9]+:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml || true)
-          echo "Verbleibende Treffer nach Bereinigung: $remaining"
+          echo "Verbleibende native-Attribute nach Bereinigung: $remaining"
           if [ "$remaining" -ne 0 ]; then
             echo "::error::Manifest-Bereinigung fehlgeschlagen, Attribute noch vorhanden"
             grep -n -E '[A-Za-z0-9]+:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml
             exit 1
           fi
+
+          remaining_pkg=$(grep -c 'org\.cromite\.cromite' netic-src/AndroidManifest.xml || true)
+          echo "Verbleibende Cromite-Paketverweise im Manifest: $remaining_pkg"
+          remaining_label=$(grep -c '"Cromite"' netic-src/AndroidManifest.xml || true)
+          echo "Verbleibendes 'Cromite'-Label im Manifest: $remaining_label"
 
       - name: Manifest auf Wohlgeformtheit prüfen
         run: |
@@ -90,6 +116,8 @@ jobs:
 
       - name: Icon austauschen
         run: |
+          # Bestätigt per Analyse: ic_launcher.png wird in allen Dichte-Ordnern
+          # verwendet (auch vom Adaptive-Icon), reines Überschreiben reicht hier.
           for dir in netic-src/res/mipmap-*; do
             if [ -d "$dir" ]; then
               cp assets/netic-icon.png "$dir/ic_launcher.png" 2>/dev/null || true
@@ -99,12 +127,18 @@ jobs:
 
       - name: Manifest vor dem Bauen prüfen (Diagnose)
         run: |
-          echo "--- Erneute Suche nach den Attributen (alle Präfixe) ---"
+          echo "--- Suche nach den nativen Attributen ---"
           grep -n -E '[A-Za-z0-9]+:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml || echo "keine Treffer"
+          echo "--- Paketname im Manifest ---"
+          grep -n 'package=' netic-src/AndroidManifest.xml | head -1
 
       - name: APK neu bauen
         run: |
           apktool b netic-src -o netic-unsigned.apk
+
+      - name: APK ausrichten (zipalign, vor dem Signieren)
+        run: |
+          zipalign -v -p 4 netic-unsigned.apk netic-aligned.apk
 
       - name: Signierschlüssel laden oder erzeugen
         run: |
@@ -112,7 +146,7 @@ jobs:
             echo "${{ secrets.NETIC_KEYSTORE_BASE64 }}" | base64 -d > netic.keystore
           else
             if [ -z "$NETIC_PW" ] || [ "${#NETIC_PW}" -lt 6 ]; then
-              echo "::error::NETIC_KEYSTORE_PASSWORD fehlt oder ist kürzer als 6 Zeichen. keytool verlangt mindestens 6 Zeichen."
+              echo "::error::NETIC_KEYSTORE_PASSWORD fehlt oder ist kürzer als 6 Zeichen."
               exit 1
             fi
             echo "::warning::Kein NETIC_KEYSTORE_BASE64-Secret gefunden, erzeuge neuen (nicht persistenten) Keystore."
@@ -125,18 +159,21 @@ jobs:
         env:
           NETIC_PW: ${{ secrets.NETIC_KEYSTORE_PASSWORD }}
 
-      - name: APK signieren
+      - name: APK signieren (apksigner, v1+v2+v3)
         run: |
-          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-            -keystore netic.keystore -storepass "${{ secrets.NETIC_KEYSTORE_PASSWORD }}" \
-            netic-unsigned.apk neticbrowser
-
-      - name: APK ausrichten (zipalign)
-        run: |
-          zipalign -v 4 netic-unsigned.apk netic-final.apk
+          # Bestätigt per Binäranalyse: die alte jarsigner-Signatur enthielt
+          # KEINEN v2/v3-Block. Bei targetSdkVersion 36 verlangt Android einen
+          # v2/v3-Signaturblock - ohne ihn kommt "Paket ist ungültig".
+          apksigner sign --ks netic.keystore \
+            --ks-pass pass:"${{ secrets.NETIC_KEYSTORE_PASSWORD }}" \
+            --ks-key-alias neticbrowser \
+            --out netic-final.apk \
+            netic-aligned.apk
+          apksigner verify --print-certs netic-final.apk
 
       - name: APK als Build-Ergebnis hochladen
         uses: actions/upload-artifact@v4
         with:
           name: netic-browser-apk
           path: netic-final.apk
+
