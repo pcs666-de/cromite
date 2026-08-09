@@ -48,14 +48,18 @@ jobs:
 
       - name: AndroidManifest.xml bereinigen
         run: |
-          sed -i '/android:zygotePreloadNativeLib=/d' netic-src/AndroidManifest.xml
-          sed -i '/android:nativeService=/d' netic-src/AndroidManifest.xml
+          # apktool 3.0.2 schreibt den Android-Namespace nicht als "android:",
+          # sondern als generischen Alias (hier "n0:"). Deshalb generisch auf
+          # ein beliebiges Namespace-Präfix (\w+:) vor dem Attributnamen matchen,
+          # statt fest "android:" anzunehmen.
+          sed -i -E '/[A-Za-z0-9]+:zygotePreloadNativeLib=/d' netic-src/AndroidManifest.xml
+          sed -i -E '/[A-Za-z0-9]+:nativeService=/d' netic-src/AndroidManifest.xml
 
-          remaining=$(grep -c -E 'android:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml || true)
+          remaining=$(grep -c -E '[A-Za-z0-9]+:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml || true)
           echo "Verbleibende Treffer nach Bereinigung: $remaining"
           if [ "$remaining" -ne 0 ]; then
             echo "::error::Manifest-Bereinigung fehlgeschlagen, Attribute noch vorhanden"
-            grep -n -E 'android:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml
+            grep -n -E '[A-Za-z0-9]+:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml
             exit 1
           fi
 
@@ -85,20 +89,11 @@ jobs:
 
       - name: Manifest vor dem Bauen prüfen (Diagnose)
         run: |
-          echo "--- Zeilen um 69 ---"
-          sed -n '60,75p' netic-src/AndroidManifest.xml
-          echo "--- Zeilen um 579-583 ---"
-          sed -n '570,590p' netic-src/AndroidManifest.xml
-          echo "--- Erneute Suche nach den Attributen ---"
-          grep -n -E 'android:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml || echo "keine Treffer"
+          echo "--- Erneute Suche nach den Attributen (alle Präfixe) ---"
+          grep -n -E '[A-Za-z0-9]+:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml || echo "keine Treffer"
 
       - name: APK neu bauen
         run: |
-          # WICHTIG: kein -f mehr hier. -f zwingt apktool offenbar dazu, die
-          # Ressourcen inkl. Manifest komplett neu aus dem beim Entpacken
-          # zwischengespeicherten Zustand aufzubauen und dabei unsere manuell
-          # bearbeitete AndroidManifest.xml zu verwerfen. Ohne -f erkennt
-          # apktool die echten Dateiänderungen und nutzt unsere Edits.
           apktool b netic-src -o netic-unsigned.apk
 
       - name: Signierschlüssel laden oder erzeugen
