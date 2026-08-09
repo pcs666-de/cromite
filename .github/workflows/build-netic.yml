@@ -18,19 +18,14 @@ jobs:
 
       - name: apktool & aapt/zipalign installieren
         run: |
-          # aktuelle apktool.jar direkt laden (v3.0.2, unterstützt neue SDK-36-Manifest-Attribute)
           sudo curl -L -o /usr/local/bin/apktool.jar \
             https://github.com/iBotPeaches/Apktool/releases/download/v3.0.2/apktool_3.0.2.jar
-          # -Xmx erhöhen: Cromite hat sehr viele Ressourcen, Standard-Heap reicht sonst
-          # nicht aus und aapt2/smali brechen mit OutOfMemoryError ab (exit code 1
-          # ohne aussagekräftige Fehlermeldung)
           {
             echo '#!/bin/bash'
             echo 'java -Xmx4096m -jar /usr/local/bin/apktool.jar "$@"'
           } | sudo tee /usr/local/bin/apktool > /dev/null
           sudo chmod +x /usr/local/bin/apktool
 
-          # aapt + zipalign per schlanken Android-Kommandozeilen-Tools (kein Emulator/QEMU)
           mkdir -p "$HOME/android-sdk"
           cd "$HOME/android-sdk"
           curl -L -o cmdline-tools.zip \
@@ -53,15 +48,32 @@ jobs:
 
       - name: AndroidManifest.xml bereinigen
         run: |
-          # android:zygotePreloadNativeLib und android:nativeService sind sehr neue
-          # Android-Plattform-Attribute (API 36), die im apktool-Framework fehlen.
-          # aapt2 kann sie beim Rebuild nicht auflösen und bricht mit
-          # "attribute ... not found" hart ab. Da sie nur optionale
-          # Zygote-Preload-Hints sind, können sie fürs Rebranding gefahrlos entfernt werden.
-          sed -i -E \
-            -e 's/[[:space:]]+android:zygotePreloadNativeLib="[^"]*"//g' \
-            -e 's/[[:space:]]+android:nativeService="[^"]*"//g' \
-            netic-src/AndroidManifest.xml
+          python3 - <<'PY'
+          import re
+
+          path = "netic-src/AndroidManifest.xml"
+          with open(path, encoding="utf-8") as f:
+              content = f.read()
+
+          pattern = re.compile(r'\s*android:(zygotePreloadNativeLib|nativeService)\s*=\s*"[^"]*"')
+          matches = len(pattern.findall(content))
+          content = pattern.sub("", content)
+
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(content)
+
+          print(f"Entfernte Attribut-Vorkommen: {matches}")
+          PY
+
+          # Absicherung: Job soll hier klar fehlschlagen, falls doch noch was übrig ist,
+          # statt erst bei aapt2 mit kryptischer Meldung abzubrechen
+          remaining=$(grep -c -E 'android:(zygotePreloadNativeLib|nativeService)' netic-src/AndroidManifest.xml || true)
+          echo "Verbleibende Treffer nach Bereinigung: $remaining"
+          if [ "$remaining" -ne 0 ]; then
+            echo "::error::Manifest-Bereinigung fehlgeschlagen, Attribute noch vorhanden"
+            grep -n -E 'android:(zygotePreloadNativeLib|nativeService)' netic-src/AndroidManifest.xml
+            exit 1
+          fi
 
       - name: App-Name & Strings ersetzen
         run: |
