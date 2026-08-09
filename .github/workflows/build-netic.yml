@@ -16,27 +16,27 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: apktool & aapt installieren
+      - name: apktool & aapt/zipalign installieren
         run: |
-          # aktuelle apktool.jar direkt laden (Ubuntu-Paket ist veraltet/fehlerhaft)
+          # aktuelle apktool.jar direkt laden (schneller & zuverlässiger als das apt-Paket)
           sudo curl -L -o /usr/local/bin/apktool.jar \
             https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar
           echo '#!/bin/bash' | sudo tee /usr/local/bin/apktool
           echo 'java -jar /usr/local/bin/apktool.jar "$@"' | sudo tee -a /usr/local/bin/apktool
           sudo chmod +x /usr/local/bin/apktool
 
-          # aapt aus Android SDK Build-Tools installieren
-          sudo apt-get update
-          sudo apt-get install -y android-sdk-build-tools || true
-          AAPT_PATH=$(find / -name "aapt" -type f 2>/dev/null | head -n 1)
-          if [ -z "$AAPT_PATH" ]; then
-            mkdir -p $HOME/build-tools
-            curl -L -o $HOME/build-tools/aapt \
-              https://android.googlesource.com/platform/prebuilts/sdk/+/master/tools/linux/aapt?format=TEXT
-            chmod +x $HOME/build-tools/aapt
-            AAPT_PATH=$HOME/build-tools/aapt
-          fi
-          echo "PATH=$PATH:$(dirname "$AAPT_PATH")" >> $GITHUB_ENV
+          # aapt + zipalign per schlanken Android-Kommandozeilen-Tools (kein Emulator/QEMU)
+          mkdir -p "$HOME/android-sdk"
+          cd "$HOME/android-sdk"
+          curl -L -o cmdline-tools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q cmdline-tools.zip
+          chmod +x cmdline-tools/bin/sdkmanager
+
+          yes | ./cmdline-tools/bin/sdkmanager --sdk_root="$HOME/android-sdk" --licenses > /dev/null 2>&1 || true
+          yes | ./cmdline-tools/bin/sdkmanager --sdk_root="$HOME/android-sdk" "build-tools;34.0.0" > /dev/null 2>&1
+
+          echo "PATH=$PATH:$HOME/android-sdk/build-tools/34.0.0" >> "$GITHUB_ENV"
 
       - name: Neuestes Cromite-APK herunterladen
         run: |
@@ -90,13 +90,7 @@ jobs:
 
       - name: APK ausrichten (zipalign)
         run: |
-          sudo apt-get install -y android-sdk-build-tools || true
-          ZIPALIGN_PATH=$(find / -name "zipalign" -type f 2>/dev/null | head -n 1)
-          if [ -n "$ZIPALIGN_PATH" ]; then
-            "$ZIPALIGN_PATH" -v 4 netic-unsigned.apk netic-final.apk
-          else
-            cp netic-unsigned.apk netic-final.apk
-          fi
+          zipalign -v 4 netic-unsigned.apk netic-final.apk || cp netic-unsigned.apk netic-final.apk
 
       - name: APK als Build-Ergebnis hochladen
         uses: actions/upload-artifact@v4
