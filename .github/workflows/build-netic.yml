@@ -51,6 +51,18 @@ jobs:
         run: |
           apktool d cromite.apk -o netic-src -f
 
+      - name: AndroidManifest.xml bereinigen
+        run: |
+          # android:zygotePreloadNativeLib und android:nativeService sind sehr neue
+          # Android-Plattform-Attribute (API 36), die im apktool-Framework fehlen.
+          # aapt2 kann sie beim Rebuild nicht auflösen und bricht mit
+          # "attribute ... not found" hart ab. Da sie nur optionale
+          # Zygote-Preload-Hints sind, können sie fürs Rebranding gefahrlos entfernt werden.
+          sed -i -E \
+            -e 's/[[:space:]]+android:zygotePreloadNativeLib="[^"]*"//g' \
+            -e 's/[[:space:]]+android:nativeService="[^"]*"//g' \
+            netic-src/AndroidManifest.xml
+
       - name: App-Name & Strings ersetzen
         run: |
           find netic-src/res/values* -name "strings.xml" -exec sed -i \
@@ -77,17 +89,10 @@ jobs:
 
       - name: APK neu bauen
         run: |
-          # Apktool 3.x nutzt aapt2 immer automatisch, das Flag --use-aapt2
-          # existiert hier nicht mehr (nur --aapt <pfad> für ein eigenes Binary)
           apktool b netic-src -o netic-unsigned.apk -f
 
       - name: Signierschlüssel laden oder erzeugen
         run: |
-          # Falls bereits ein Keystore als Secret hinterlegt ist, diesen verwenden,
-          # damit jede App-Version mit demselben Zertifikat signiert ist. Sonst
-          # erzeugt jeder Lauf ein NEUES, zufälliges Zertifikat -> Android verweigert
-          # dann das Update über eine bereits installierte .Netic-Version
-          # ("INSTALL_FAILED_UPDATE_INCOMPATIBLE").
           if [ -n "${{ secrets.NETIC_KEYSTORE_BASE64 }}" ]; then
             echo "${{ secrets.NETIC_KEYSTORE_BASE64 }}" | base64 -d > netic.keystore
           else
