@@ -77,11 +77,9 @@ jobs:
 
       - name: APK neu bauen
         run: |
-          # --use-aapt2 explizit erzwingen: das alte aapt1-Verhalten lehnt
-          # Ressourcennamen ab, die apktool beim Entpacken von Animated-Vector-
-          # Drawables mit "$"-Präfix erzeugt (z.B. $avd_show_password__0.xml)
-          # und bricht sonst mit "Invalid file name" + exit code 1 ab.
-          apktool b netic-src -o netic-unsigned.apk --use-aapt2
+          # Apktool 3.x nutzt aapt2 immer automatisch, das Flag --use-aapt2
+          # existiert hier nicht mehr (nur --aapt <pfad> für ein eigenes Binary)
+          apktool b netic-src -o netic-unsigned.apk -f
 
       - name: Signierschlüssel laden oder erzeugen
         run: |
