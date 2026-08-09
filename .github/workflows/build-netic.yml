@@ -52,8 +52,14 @@ jobs:
           # sondern als generischen Alias (hier "n0:"). Deshalb generisch auf
           # ein beliebiges Namespace-Präfix (\w+:) vor dem Attributnamen matchen,
           # statt fest "android:" anzunehmen.
-          sed -i -E '/[A-Za-z0-9]+:zygotePreloadNativeLib=/d' netic-src/AndroidManifest.xml
-          sed -i -E '/[A-Za-z0-9]+:nativeService=/d' netic-src/AndroidManifest.xml
+          #
+          # WICHTIG: Nur das Attribut selbst entfernen (s///), NICHT die ganze
+          # Zeile löschen (/d). apktool schreibt das schließende ">" bzw. "/>"
+          # eines Tags oft in derselben Zeile wie das letzte Attribut. Eine
+          # Zeilenlöschung würde dieses ">" mitreißen und das Tag unclosed
+          # zurücklassen -> XML-Parse-Fehler "manifest must be terminated".
+          sed -i -E 's/[[:space:]]*[A-Za-z0-9]+:zygotePreloadNativeLib="[^"]*"//g' netic-src/AndroidManifest.xml
+          sed -i -E 's/[[:space:]]*[A-Za-z0-9]+:nativeService="[^"]*"//g' netic-src/AndroidManifest.xml
 
           remaining=$(grep -c -E '[A-Za-z0-9]+:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml || true)
           echo "Verbleibende Treffer nach Bereinigung: $remaining"
@@ -62,6 +68,10 @@ jobs:
             grep -n -E '[A-Za-z0-9]+:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml
             exit 1
           fi
+
+      - name: Manifest auf Wohlgeformtheit prüfen
+        run: |
+          python3 -c "import xml.etree.ElementTree as ET; ET.parse('netic-src/AndroidManifest.xml')"
 
       - name: App-Name & Strings ersetzen
         run: |
