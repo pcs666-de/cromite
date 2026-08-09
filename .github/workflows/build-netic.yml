@@ -21,8 +21,13 @@ jobs:
           # aktuelle apktool.jar direkt laden (v3.0.2, unterstützt neue SDK-36-Manifest-Attribute)
           sudo curl -L -o /usr/local/bin/apktool.jar \
             https://github.com/iBotPeaches/Apktool/releases/download/v3.0.2/apktool_3.0.2.jar
-          echo '#!/bin/bash' | sudo tee /usr/local/bin/apktool
-          echo 'java -jar /usr/local/bin/apktool.jar "$@"' | sudo tee -a /usr/local/bin/apktool
+          # -Xmx erhöhen: Cromite hat sehr viele Ressourcen, Standard-Heap reicht sonst
+          # nicht aus und aapt2/smali brechen mit OutOfMemoryError ab (exit code 1
+          # ohne aussagekräftige Fehlermeldung)
+          {
+            echo '#!/bin/bash'
+            echo 'java -Xmx4096m -jar /usr/local/bin/apktool.jar "$@"'
+          } | sudo tee /usr/local/bin/apktool > /dev/null
           sudo chmod +x /usr/local/bin/apktool
 
           # aapt + zipalign per schlanken Android-Kommandozeilen-Tools (kein Emulator/QEMU)
@@ -72,15 +77,29 @@ jobs:
 
       - name: APK neu bauen
         run: |
-          apktool b netic-src -o netic-unsigned.apk
+          # --use-aapt2 explizit erzwingen: das alte aapt1-Verhalten lehnt
+          # Ressourcennamen ab, die apktool beim Entpacken von Animated-Vector-
+          # Drawables mit "$"-Präfix erzeugt (z.B. $avd_show_password__0.xml)
+          # und bricht sonst mit "Invalid file name" + exit code 1 ab.
+          apktool b netic-src -o netic-unsigned.apk --use-aapt2
 
-      - name: Signierschlüssel erzeugen (einmalig, selbstsigniert)
+      - name: Signierschlüssel laden oder erzeugen
         run: |
-          keytool -genkey -v -keystore netic.keystore -alias neticbrowser \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass "${{ secrets.NETIC_KEYSTORE_PASSWORD }}" \
-            -keypass "${{ secrets.NETIC_KEYSTORE_PASSWORD }}" \
-            -dname "CN=Netic, OU=Netic, O=Netic, L=, S=, C=DE"
+          # Falls bereits ein Keystore als Secret hinterlegt ist, diesen verwenden,
+          # damit jede App-Version mit demselben Zertifikat signiert ist. Sonst
+          # erzeugt jeder Lauf ein NEUES, zufälliges Zertifikat -> Android verweigert
+          # dann das Update über eine bereits installierte .Netic-Version
+          # ("INSTALL_FAILED_UPDATE_INCOMPATIBLE").
+          if [ -n "${{ secrets.NETIC_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.NETIC_KEYSTORE_BASE64 }}" | base64 -d > netic.keystore
+          else
+            echo "::warning::Kein NETIC_KEYSTORE_BASE64-Secret gefunden, erzeuge neuen (nicht persistenten) Keystore."
+            keytool -genkeypair -v -keystore netic.keystore -alias neticbrowser \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "${{ secrets.NETIC_KEYSTORE_PASSWORD }}" \
+              -keypass "${{ secrets.NETIC_KEYSTORE_PASSWORD }}" \
+              -dname "CN=Netic, OU=Netic, O=Netic, L=, S=, C=DE"
+          fi
 
       - name: APK signieren
         run: |
@@ -90,7 +109,7 @@ jobs:
 
       - name: APK ausrichten (zipalign)
         run: |
-          zipalign -v 4 netic-unsigned.apk netic-final.apk || cp netic-unsigned.apk netic-final.apk
+          zipalign -v 4 netic-unsigned.apk netic-final.apk
 
       - name: APK als Build-Ergebnis hochladen
         uses: actions/upload-artifact@v4
