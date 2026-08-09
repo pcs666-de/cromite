@@ -48,14 +48,9 @@ jobs:
 
       - name: AndroidManifest.xml bereinigen
         run: |
-          # android:zygotePreloadNativeLib und android:nativeService sind sehr neue
-          # Android-Plattform-Attribute (API 36), die im apktool-Framework fehlen.
-          # aapt2 kann sie beim Rebuild nicht auflösen und bricht ab.
-          # Jede Fehlermeldung nennt eine eigene Zeile -> einfaches Zeilen-Löschen reicht.
           sed -i '/android:zygotePreloadNativeLib=/d' netic-src/AndroidManifest.xml
           sed -i '/android:nativeService=/d' netic-src/AndroidManifest.xml
 
-          # Absicherung: Job soll klar fehlschlagen, falls doch noch was übrig ist
           remaining=$(grep -c -E 'android:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml || true)
           echo "Verbleibende Treffer nach Bereinigung: $remaining"
           if [ "$remaining" -ne 0 ]; then
@@ -88,9 +83,23 @@ jobs:
             fi
           done
 
+      - name: Manifest vor dem Bauen prüfen (Diagnose)
+        run: |
+          echo "--- Zeilen um 69 ---"
+          sed -n '60,75p' netic-src/AndroidManifest.xml
+          echo "--- Zeilen um 579-583 ---"
+          sed -n '570,590p' netic-src/AndroidManifest.xml
+          echo "--- Erneute Suche nach den Attributen ---"
+          grep -n -E 'android:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml || echo "keine Treffer"
+
       - name: APK neu bauen
         run: |
-          apktool b netic-src -o netic-unsigned.apk -f
+          # WICHTIG: kein -f mehr hier. -f zwingt apktool offenbar dazu, die
+          # Ressourcen inkl. Manifest komplett neu aus dem beim Entpacken
+          # zwischengespeicherten Zustand aufzubauen und dabei unsere manuell
+          # bearbeitete AndroidManifest.xml zu verwerfen. Ohne -f erkennt
+          # apktool die echten Dateiänderungen und nutzt unsere Edits.
+          apktool b netic-src -o netic-unsigned.apk
 
       - name: Signierschlüssel laden oder erzeugen
         run: |
