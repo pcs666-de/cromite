@@ -74,7 +74,7 @@ jobs:
           # 2) Paketname umbenennen. Bestätigt per Binäranalyse: package blieb
           #    bislang "org.cromite.cromite" - Kollisionsgefahr mit echtem
           #    Cromite und Teil des Rebranding-Bugs.
-          sed -i -E 's/package="org\.cromite\.cromite"/package="ws.ct.pcs-production.netic"/' netic-src/AndroidManifest.xml
+          sed -i -E 's/package="org\.cromite\.cromite"/package="ws.ct.pcsproduction.netic"/' netic-src/AndroidManifest.xml
 
           # 3) App-Label umbenennen. Bestätigt per Binäranalyse: android:label
           #    steht als Literal "Cromite" direkt im Manifest (keine
