@@ -48,30 +48,19 @@ jobs:
 
       - name: AndroidManifest.xml bereinigen
         run: |
-          python3 - <<'PY'
-          import re
+          # android:zygotePreloadNativeLib und android:nativeService sind sehr neue
+          # Android-Plattform-Attribute (API 36), die im apktool-Framework fehlen.
+          # aapt2 kann sie beim Rebuild nicht auflösen und bricht ab.
+          # Jede Fehlermeldung nennt eine eigene Zeile -> einfaches Zeilen-Löschen reicht.
+          sed -i '/android:zygotePreloadNativeLib=/d' netic-src/AndroidManifest.xml
+          sed -i '/android:nativeService=/d' netic-src/AndroidManifest.xml
 
-          path = "netic-src/AndroidManifest.xml"
-          with open(path, encoding="utf-8") as f:
-              content = f.read()
-
-          pattern = re.compile(r'\s*android:(zygotePreloadNativeLib|nativeService)\s*=\s*"[^"]*"')
-          matches = len(pattern.findall(content))
-          content = pattern.sub("", content)
-
-          with open(path, "w", encoding="utf-8") as f:
-              f.write(content)
-
-          print(f"Entfernte Attribut-Vorkommen: {matches}")
-          PY
-
-          # Absicherung: Job soll hier klar fehlschlagen, falls doch noch was übrig ist,
-          # statt erst bei aapt2 mit kryptischer Meldung abzubrechen
-          remaining=$(grep -c -E 'android:(zygotePreloadNativeLib|nativeService)' netic-src/AndroidManifest.xml || true)
+          # Absicherung: Job soll klar fehlschlagen, falls doch noch was übrig ist
+          remaining=$(grep -c -E 'android:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml || true)
           echo "Verbleibende Treffer nach Bereinigung: $remaining"
           if [ "$remaining" -ne 0 ]; then
             echo "::error::Manifest-Bereinigung fehlgeschlagen, Attribute noch vorhanden"
-            grep -n -E 'android:(zygotePreloadNativeLib|nativeService)' netic-src/AndroidManifest.xml
+            grep -n -E 'android:(zygotePreloadNativeLib|nativeService)=' netic-src/AndroidManifest.xml
             exit 1
           fi
 
