@@ -1,0 +1,84 @@
+name: Build .Netic
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repo auschecken
+        uses: actions/checkout@v4
+
+      - name: Java einrichten
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: apktool installieren
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apktool
+
+      - name: Neuestes Cromite-APK herunterladen
+        run: |
+          curl -L -o cromite.apk https://github.com/uazo/cromite/releases/latest/download/arm64_ChromePublic.apk
+
+      - name: APK entpacken
+        run: |
+          apktool d cromite.apk -o netic-src -f
+
+      - name: App-Name & Strings ersetzen
+        run: |
+          find netic-src/res/values* -name "strings.xml" -exec sed -i \
+            -e 's/Chromium/.Netic/g' \
+            -e 's/Cromite/.Netic/g' {} \;
+
+      - name: Farben (dunkelblau/Netzwerk-Theme) setzen
+        run: |
+          find netic-src/res/values* -name "colors.xml" | while read f; do
+            sed -i \
+              -e 's/name="default_primary_color">#[0-9A-Fa-f]*/name="default_primary_color">#0e2670/' \
+              -e 's/name="toolbar_background">#[0-9A-Fa-f]*/name="toolbar_background">#050a1e/' \
+              "$f" || true
+          done
+
+      - name: Icon austauschen
+        run: |
+          # Netic-Logo (PNG) muss vorher im Repo liegen, z.B. unter assets/netic-icon.png
+          for dir in netic-src/res/mipmap-*; do
+            if [ -d "$dir" ]; then
+              cp assets/netic-icon.png "$dir/ic_launcher.png" 2>/dev/null || true
+              cp assets/netic-icon.png "$dir/ic_launcher_round.png" 2>/dev/null || true
+            fi
+          done
+
+      - name: APK neu bauen
+        run: |
+          apktool b netic-src -o netic-unsigned.apk
+
+      - name: Signierschlüssel erzeugen (einmalig, selbstsigniert)
+        run: |
+          keytool -genkey -v -keystore netic.keystore -alias neticbrowser \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "${{ secrets.NETIC_KEYSTORE_PASSWORD }}" \
+            -keypass "${{ secrets.NETIC_KEYSTORE_PASSWORD }}" \
+            -dname "CN=Netic, OU=Netic, O=Netic, L=, S=, C=DE"
+
+      - name: APK signieren
+        run: |
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+            -keystore netic.keystore -storepass "${{ secrets.NETIC_KEYSTORE_PASSWORD }}" \
+            netic-unsigned.apk neticbrowser
+
+      - name: APK ausrichten (zipalign)
+        run: |
+          sudo apt-get install -y android-sdk-build-tools || true
+          zipalign -v 4 netic-unsigned.apk netic-final.apk || cp netic-unsigned.apk netic-final.apk
+
+      - name: APK als Build-Ergebnis hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: netic-browser-apk
+          path: netic-final.apk
