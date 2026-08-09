@@ -111,13 +111,19 @@ jobs:
           if [ -n "${{ secrets.NETIC_KEYSTORE_BASE64 }}" ]; then
             echo "${{ secrets.NETIC_KEYSTORE_BASE64 }}" | base64 -d > netic.keystore
           else
+            if [ -z "$NETIC_PW" ] || [ "${#NETIC_PW}" -lt 6 ]; then
+              echo "::error::NETIC_KEYSTORE_PASSWORD fehlt oder ist kürzer als 6 Zeichen. keytool verlangt mindestens 6 Zeichen."
+              exit 1
+            fi
             echo "::warning::Kein NETIC_KEYSTORE_BASE64-Secret gefunden, erzeuge neuen (nicht persistenten) Keystore."
             keytool -genkeypair -v -keystore netic.keystore -alias neticbrowser \
               -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass "${{ secrets.NETIC_KEYSTORE_PASSWORD }}" \
-              -keypass "${{ secrets.NETIC_KEYSTORE_PASSWORD }}" \
+              -storepass "$NETIC_PW" \
+              -keypass "$NETIC_PW" \
               -dname "CN=Netic, OU=Netic, O=Netic, L=, S=, C=DE"
           fi
+        env:
+          NETIC_PW: ${{ secrets.NETIC_KEYSTORE_PASSWORD }}
 
       - name: APK signieren
         run: |
