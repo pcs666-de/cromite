@@ -18,9 +18,9 @@ jobs:
 
       - name: apktool & aapt/zipalign installieren
         run: |
-          # aktuelle apktool.jar direkt laden (schneller & zuverlässiger als das apt-Paket)
+          # aktuelle apktool.jar direkt laden (v3.0.2, unterstützt neue SDK-36-Manifest-Attribute)
           sudo curl -L -o /usr/local/bin/apktool.jar \
-            https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar
+            https://github.com/iBotPeaches/Apktool/releases/download/v3.0.2/apktool_3.0.2.jar
           echo '#!/bin/bash' | sudo tee /usr/local/bin/apktool
           echo 'java -jar /usr/local/bin/apktool.jar "$@"' | sudo tee -a /usr/local/bin/apktool
           sudo chmod +x /usr/local/bin/apktool
