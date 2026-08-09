@@ -16,10 +16,27 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: apktool installieren
+      - name: apktool & aapt installieren
         run: |
+          # aktuelle apktool.jar direkt laden (Ubuntu-Paket ist veraltet/fehlerhaft)
+          sudo curl -L -o /usr/local/bin/apktool.jar \
+            https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/apktool
+          echo 'java -jar /usr/local/bin/apktool.jar "$@"' | sudo tee -a /usr/local/bin/apktool
+          sudo chmod +x /usr/local/bin/apktool
+
+          # aapt aus Android SDK Build-Tools installieren
           sudo apt-get update
-          sudo apt-get install -y apktool
+          sudo apt-get install -y android-sdk-build-tools || true
+          AAPT_PATH=$(find / -name "aapt" -type f 2>/dev/null | head -n 1)
+          if [ -z "$AAPT_PATH" ]; then
+            mkdir -p $HOME/build-tools
+            curl -L -o $HOME/build-tools/aapt \
+              https://android.googlesource.com/platform/prebuilts/sdk/+/master/tools/linux/aapt?format=TEXT
+            chmod +x $HOME/build-tools/aapt
+            AAPT_PATH=$HOME/build-tools/aapt
+          fi
+          echo "PATH=$PATH:$(dirname "$AAPT_PATH")" >> $GITHUB_ENV
 
       - name: Neuestes Cromite-APK herunterladen
         run: |
@@ -46,7 +63,6 @@ jobs:
 
       - name: Icon austauschen
         run: |
-          # Netic-Logo (PNG) muss vorher im Repo liegen, z.B. unter assets/netic-icon.png
           for dir in netic-src/res/mipmap-*; do
             if [ -d "$dir" ]; then
               cp assets/netic-icon.png "$dir/ic_launcher.png" 2>/dev/null || true
@@ -75,7 +91,12 @@ jobs:
       - name: APK ausrichten (zipalign)
         run: |
           sudo apt-get install -y android-sdk-build-tools || true
-          zipalign -v 4 netic-unsigned.apk netic-final.apk || cp netic-unsigned.apk netic-final.apk
+          ZIPALIGN_PATH=$(find / -name "zipalign" -type f 2>/dev/null | head -n 1)
+          if [ -n "$ZIPALIGN_PATH" ]; then
+            "$ZIPALIGN_PATH" -v 4 netic-unsigned.apk netic-final.apk
+          else
+            cp netic-unsigned.apk netic-final.apk
+          fi
 
       - name: APK als Build-Ergebnis hochladen
         uses: actions/upload-artifact@v4
